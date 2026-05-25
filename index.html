@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://accounts.google.com/gsi/client"></script>
 <style>
 :root {
   --navy-950: #050E1C;
@@ -752,22 +752,40 @@ function disconnect() {
 function initAuth() {
   const c = cfg();
   if (!c.clientId) return;
-  document.getElementById('cfgClientId').value = c.clientId;
-  document.getElementById('cfgSheetId').value = c.sheetId;
+  document.getElementById('cfgClientId').value  = c.clientId;
+  document.getElementById('cfgSheetId').value   = c.sheetId;
   document.getElementById('cfgSheetName').value = c.sheetName;
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: c.clientId,
     scope: 'https://www.googleapis.com/auth/spreadsheets',
     callback: resp => {
-      if (resp.error) { toast('Auth failed: ' + resp.error, 'error'); setAuth(false); return; }
+      if (resp.error) {
+        // Silent re-auth failed — ask user to sign in explicitly
+        if (resp.error === 'interaction_required' || resp.error === 'login_required') {
+          setAuth(false);
+          document.getElementById('tBody').innerHTML = `<tr><td colspan="11"><div class="empty">
+            <div class="empty-icon">🔒</div>
+            <div class="empty-title">Sign in Required</div>
+            <div class="empty-text"><button class="btn btn-navy" onclick="requestSignIn()" style="margin-top:12px">Sign in with Google</button></div>
+          </div></td></tr>`;
+          return;
+        }
+        toast('Auth failed: ' + resp.error, 'error');
+        setAuth(false);
+        return;
+      }
       accessToken = resp.access_token;
       setAuth(true);
       initSheet().then(() => loadData());
     }
   });
+  // Try silent sign-in first (no popup)
   tokenClient.requestAccessToken({ prompt: '' });
 }
-function setAuth(ok) {
+function requestSignIn() {
+  if (tokenClient) tokenClient.requestAccessToken({ prompt: 'consent' });
+  else { waitForGoogle(() => { initAuth(); }); }
+}
   document.getElementById('authDot').className = 'auth-dot' + (ok ? ' on' : '');
   document.getElementById('authLabel').textContent = ok ? 'Connected to Google Sheets' : 'Not connected';
 }
@@ -1097,15 +1115,30 @@ function toast(text, type='success') {
 document.getElementById('propOverlay').addEventListener('click', e => { if(e.target===e.currentTarget) closeModal(); });
 
 // ── INIT ────────────────────────────
+function waitForGoogle(cb, attempts) {
+  attempts = attempts || 0;
+  if (attempts > 40) { toast('Google failed to load. Refresh the page.', 'error'); return; }
+  if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
+    cb();
+  } else {
+    setTimeout(() => waitForGoogle(cb, attempts + 1), 250);
+  }
+}
+
 window.onload = function() {
   const c = cfg();
   if (c.clientId && c.sheetId) {
-    document.getElementById('cfgClientId').value = c.clientId;
-    document.getElementById('cfgSheetId').value  = c.sheetId;
-    document.getElementById('cfgSheetName').value= c.sheetName;
-    setTimeout(()=>initAuth(), 600);
+    document.getElementById('cfgClientId').value  = c.clientId;
+    document.getElementById('cfgSheetId').value   = c.sheetId;
+    document.getElementById('cfgSheetName').value = c.sheetName;
+    document.getElementById('tBody').innerHTML = `<tr><td colspan="11"><div class="empty">
+      <div class="empty-icon"><div class="spinner"></div></div>
+      <div class="empty-title">Connecting…</div>
+      <div class="empty-text">Signing in to Google Sheets</div>
+    </div></td></tr>`;
+    waitForGoogle(() => initAuth());
   } else {
-    setTimeout(()=>toggleCfg(), 900);
+    setTimeout(() => toggleCfg(), 900);
     document.getElementById('tBody').innerHTML = `<tr><td colspan="11"><div class="empty">
       <div class="empty-icon">⚙</div>
       <div class="empty-title">Setup Required</div>
